@@ -142,12 +142,66 @@ def find_unpinned_changes(root: Path) -> list[tuple[str, str, str]]:
     return offenders
 
 
+def find_unpinned_additions(root: Path) -> list[str]:
+    """Staged files that will be TRACKED but carry no row in the staged manifest.
+
+    The sibling check above deliberately ignores these -- its own docstring
+    says "touch only unpinned or brand-new files -> PASSES", because its
+    hazard is the split commit, a pinned file whose row went stale.
+
+    That left the other half open, and it shipped. On 2026-09-13 a hand
+    landing finished with `git add -A`, which swept in `.nh-local` -- an
+    untracked-but-not-ignored symlink whose target is an absolute path on the
+    operator's machine. Brand-new, so this gate passed it; the file reached
+    the PUBLIC repository and turned `File inventory` red with
+    "`.nh-local`: tracked but not listed". CI caught it, which means main was
+    already red and the content was already published.
+
+    `check_release_manifest.py --strict` is exactly this check and it runs in
+    CI. This moves it to commit time, which is the last moment it is still
+    free to fix.
+
+    Ignored files are not staged, so they cannot reach here. A file that is
+    genuinely meant to ship passes as soon as its row is written and staged --
+    the same one-extra-step remedy the sibling check asks for.
+    """
+    pins = staged_pins(root)
+    if pins is None:
+        return []
+    return sorted(rel for rel in staged_paths(root)
+                  if rel != MANIFEST_NAME and rel not in pins)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         root = repo_root()
     except (subprocess.CalledProcessError, OSError):
         # Not in a git repo (or git unavailable): nothing to gate, do not block.
         return 0
+
+    additions = find_unpinned_additions(root)
+    if additions:
+        print("no_human pre-commit gate: REFUSED.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("These staged file(s) would be TRACKED but have no row in %s,"
+              % MANIFEST_NAME, file=sys.stderr)
+        print("so this commit would publish a file the export ledger has never"
+              " approved:", file=sys.stderr)
+        for rel in additions:
+            print(f"  {rel}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  If it SHOULD ship: pin it and stage the manifest in the SAME"
+              " commit:", file=sys.stderr)
+        print(f"    {remedy_command(root, ' '.join(additions))}",
+              file=sys.stderr)
+        print(f"    git add {MANIFEST_NAME}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("  If it should NOT ship: unstage it, and add it to .gitignore so"
+              " the next", file=sys.stderr)
+        print("  `git add -A` cannot sweep it in again:", file=sys.stderr)
+        print(f"    git restore --staged {' '.join(additions)}",
+              file=sys.stderr)
+        return 1
 
     offenders = find_unpinned_changes(root)
     if not offenders:

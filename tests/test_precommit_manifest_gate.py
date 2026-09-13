@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -145,9 +146,67 @@ def test_repin_written_but_manifest_not_staged_is_blocked(repo):
     assert "shipped.txt" in proc.stderr
 
 
-def test_only_unpinned_and_new_files_pass(repo):
+def _repin(root: Path):
+    """Regenerate the manifest and stage it, as the gate's own remedy says."""
+    subprocess.run(
+        [sys.executable, str(root / "scripts" / "check_release_manifest.py"),
+         "--write"],
+        cwd=root, check=True, capture_output=True)
+    _git(root, "add", "RELEASE_MANIFEST.txt")
+
+
+def test_a_brand_new_tracked_file_with_no_manifest_row_is_refused(repo):
+    """A newly tracked file must carry its pin in the SAME commit.
+
+    CONTRACT CHANGED 2026-09-13, and the old one is the reason. This test
+    previously asserted the opposite -- that a brand-new unpinned file PASSES
+    -- because the gate was scoped to the split commit, a pinned file whose
+    row went stale. The other half was left open and it shipped: a hand
+    landing finished with `git add -A`, which swept in `.nh-local`, an
+    untracked-but-not-ignored symlink pointing at an absolute path on the
+    operator's machine. Brand-new, so the gate passed it, and it reached the
+    PUBLIC repository. CI's `File inventory` job caught it with
+    "`.nh-local`: tracked but not listed" -- by which time main was red and
+    the content was published.
+
+    `check_release_manifest.py --strict` already enforces exactly this in CI.
+    The gate now enforces it at commit time, which is the last moment it is
+    free to fix. A file genuinely meant to ship passes as soon as its row is
+    written and staged, which is the same one-step remedy the sibling check
+    already asks for -- see the pairing test below.
+    """
     (repo / "notes.md").write_bytes(b"just notes\n")     # brand-new, unpinned
     _git(repo, "add", "notes.md")
+    proc = _run_gate(repo)
+    assert proc.returncode == 1, proc.stderr
+    assert "notes.md" in proc.stderr
+    assert "never approved" in proc.stderr
+
+
+def test_a_brand_new_file_passes_once_its_row_is_staged(repo):
+    """The pairing control for the test above.
+
+    Without this, the gate could be satisfied by refusing everything new, and
+    the refusal test alone could not tell that apart from a working gate.
+    """
+    (repo / "notes.md").write_bytes(b"just notes\n")
+    _git(repo, "add", "notes.md")
+    _repin(repo)
+    proc = _run_gate(repo)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_an_ignored_file_cannot_reach_the_gate(repo):
+    """A gitignored file is never staged, so the new check cannot fire on it.
+
+    This is what keeps the refusal from becoming noise: the remedy the gate
+    prints for a file that should NOT ship is "unstage it and gitignore it",
+    and this pins that the remedy actually works.
+    """
+    (repo / ".gitignore").write_bytes(b"scratch.tmp\n")
+    (repo / "scratch.tmp").write_bytes(b"local only\n")
+    _git(repo, "add", "-A")
+    _repin(repo)
     proc = _run_gate(repo)
     assert proc.returncode == 0, proc.stderr
 
