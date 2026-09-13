@@ -144,11 +144,25 @@ class Unpinnable:
         classified cannot be shown to ship, so it cannot be pinned either.
     """
 
-    def __init__(self, verdicts: dict[str, str]):
+    def __init__(self, verdicts: dict[str, str],
+                 dropped: "frozenset[str] | None" = None):
         self._verdicts = verdicts
+        # The `drop` half ALONE. `reason()` deliberately answers for both
+        # kinds, because for THIS file's question -- "may this path carry a
+        # manifest row?" -- unclassified and drop have the same answer. A
+        # caller asking a different question needs them apart: the
+        # pre-commit gate asks "is this NEW file approved to be tracked?",
+        # and there unclassified is precisely the UNAPPROVED case, not an
+        # exemption. Collapsing the two let a brand-new unclassified file
+        # through that gate -- measured, with the payload it exists to stop.
+        self._dropped = frozenset(dropped or ())
 
     def reason(self, rel: str) -> str | None:
         return self._verdicts.get(rel)
+
+    def is_dropped(self, rel: str) -> bool:
+        """Whether `rel` is classified `drop` -- NOT merely unclassified."""
+        return rel in self._dropped
 
     def __len__(self) -> int:
         return len(self._verdicts)
@@ -200,7 +214,7 @@ def load_unpinnable(root: Path, builder_root: Path | None = None
     verdicts = {rel: "classified `drop`" for rel in cls.dropped}
     verdicts.update({rel: f"matches no rule in {CLASSIFICATION_NAME}"
                      for rel in cls.unclassified})
-    return Unpinnable(verdicts)
+    return Unpinnable(verdicts, frozenset(cls.dropped))
 
 
 def _previous_rows(manifest_path: Path) -> dict[str, str]:

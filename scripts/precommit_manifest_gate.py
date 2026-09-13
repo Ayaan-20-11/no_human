@@ -244,10 +244,18 @@ def find_unpinned_additions(root: Path) -> list[str]:
             "  files against. Fix the classification, or commit with\n"
             "  --no-verify and say why.") from None
 
+    # `is_dropped`, NOT `reason()`. `reason()` answers for drop AND for
+    # "matches no rule", because the manifest checker's question is "may this
+    # carry a row?" and both answer no. This gate asks a different question --
+    # "is this NEW file approved to be tracked?" -- and a file swept in by
+    # `git add -A` is by definition unclassified, so exempting on `reason()`
+    # exempted exactly the class the gate exists to catch. Measured: with
+    # that exemption, the `.nh-local` payload committed CLEAN in a classified
+    # tree, which the version before this check was added had refused.
     return sorted(rel for rel in candidates
                   if rel not in pins
                   and not (unpinnable is not None
-                           and unpinnable.reason(rel) is not None))
+                           and unpinnable.is_dropped(rel)))
 
 
 def _no_manifest_message(root: Path) -> str:
