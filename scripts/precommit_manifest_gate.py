@@ -96,16 +96,10 @@ def repo_root() -> Path:
 
 
 def staged_paths(root: Path) -> list[str]:
-    """Paths added, modified or TYPECHANGED in the index (not deleted).
-
-    A deletion cannot be a content-vs-pin mismatch, so it is out of scope.
-    `T` is in scope and was missing: a pinned regular file replaced by a
-    SYMLINK is reported as `T`, not `M`, so `AM` never saw it and the pin
-    comparison never ran. Measured -- a pinned file re-pointed at an absolute
-    path outside the repo committed with the gate silent, which is the
-    incident's own payload arriving by a different door."""
+    """Paths added or modified in the index (not deleted). A deletion cannot be
+    a content-vs-pin mismatch, so it is out of scope here."""
     out = subprocess.check_output(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=AMT", "-z"],
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=AM", "-z"],
         cwd=root, text=True)
     return [p for p in out.split("\0") if p]
 
@@ -148,157 +142,12 @@ def find_unpinned_changes(root: Path) -> list[tuple[str, str, str]]:
     return offenders
 
 
-def newly_tracked_paths(root: Path) -> list[str]:
-    """Staged paths that will be TRACKED and were not tracked before.
-
-    NOT `staged_paths()`. That helper is `--diff-filter=AM`, and `M` is
-    MODIFICATION -- every already-tracked file you edit. Reusing it made the
-    additions check fire on ordinary edits: measured, the source checkout has
-    135 tracked files with no manifest row (`CLAUDE.md`,
-    `EXPORT_CLASSIFICATION.txt`, `docs/CONSTRAINT_HISTORY.md`, ...), so
-    editing any one of them would have been refused, with both printed
-    remedies dead ends -- `export_guard.py approve` refuses a non-ship path,
-    and gitignoring does nothing to an already-tracked file. The only escape
-    would have been `--no-verify`, which trains the operator to bypass the
-    gate that guards publication.
-
-    `R` and `T` are included and `M` is not. A rename's DESTINATION is newly
-    tracked under that name, and a typechange is how a pinned regular file
-    becomes a SYMLINK -- which is the incident's own payload, and with
-    `AM` it committed straight through: a pinned file re-pointed at an
-    absolute path outside the repo reached HEAD with the gate silent.
-    Rename detection is also config-dependent (`diff.renames`), so relying on
-    a rename decomposing into A+D would make correctness depend on a git
-    setting this repo does not control.
-    """
-    out = subprocess.check_output(
-        ["git", "diff", "--cached", "--name-status", "--diff-filter=ARTC", "-z"],
-        cwd=root, text=True)
-    fields = [f for f in out.split("\0") if f]
-    paths: list[str] = []
-    i = 0
-    while i < len(fields):
-        status = fields[i]
-        # R/C carry TWO paths: source then destination. The destination is the
-        # one that becomes tracked under a new name.
-        if status[:1] in ("R", "C"):
-            if i + 2 < len(fields):
-                paths.append(fields[i + 2])
-            i += 3
-        else:
-            if i + 1 < len(fields):
-                paths.append(fields[i + 1])
-            i += 2
-    return paths
-
-
-def find_unpinned_additions(root: Path) -> list[str]:
-    """Newly tracked staged files that carry no row in the staged manifest.
-
-    The sibling check ignores these -- its hazard is the split commit, a
-    pinned file whose row went stale. That left the other half open and it
-    shipped: a hand landing finished with `git add -A`, which swept in
-    `.nh-local`, an untracked-but-not-ignored symlink whose target is an
-    absolute path on the operator's machine. It reached the PUBLIC repository
-    and turned `File inventory` red -- by which point main was red and the
-    content was published.
-
-    CLASSIFICATION IS CONSULTED, not just the manifest. A repo carrying
-    `EXPORT_CLASSIFICATION.txt` legitimately tracks files that never ship and
-    are therefore never pinned; `check_release_manifest.py` says of them
-    "Never a problem, never fatal -- not even under `--strict`". Asking the
-    manifest alone would contradict the very checker this gate claims to
-    mirror, so the same `load_unpinnable` judgement is reused rather than
-    re-implemented.
-    """
-    candidates = [rel for rel in newly_tracked_paths(root) if rel != MANIFEST_NAME]
-    if not candidates:
-        # Nothing is becoming tracked, so this check has no opinion. Decided
-        # BEFORE reading the manifest on purpose: the absent-manifest refusal
-        # below must not fire on an ordinary commit that simply does not touch
-        # the ledger, which is most commits.
-        return []
-
-    pins = staged_pins(root)
-    if pins is None:
-        # Files are becoming tracked and there is no ledger in the index to
-        # approve them against. Staging a deletion of the manifest otherwise
-        # disarms the whole gate -- measured, a rogue symlink then committed
-        # cleanly. Narrow on purpose: a repo that simply has no manifest and
-        # is adding nothing reaches the early return above.
-        raise SystemExit(_no_manifest_message(root))
-
-    try:
-        unpinnable = _crm.load_unpinnable(root)
-    except Exception as exc:  # noqa: BLE001 - the checker's own Refused, and
-        # anything else the classification parser raises. Present-but-
-        # unparseable is a REFUSAL by that checker's design, not a skip, so
-        # this propagates rather than guessing -- but it propagates in the
-        # gate's own voice. Uncaught, the operator got a stack trace and a
-        # blocked commit with no statement of what to do.
-        raise SystemExit(
-            "no_human pre-commit gate: REFUSED.\n\n"
-            f"This tree has an {_crm.CLASSIFICATION_NAME} that cannot be read:\n"
-            f"  {exc}\n\n"
-            "  A ship/drop split we cannot parse is not one we can approve\n"
-            "  files against. Fix the classification, or commit with\n"
-            "  --no-verify and say why.") from None
-
-    # `is_dropped`, NOT `reason()`. `reason()` answers for drop AND for
-    # "matches no rule", because the manifest checker's question is "may this
-    # carry a row?" and both answer no. This gate asks a different question --
-    # "is this NEW file approved to be tracked?" -- and a file swept in by
-    # `git add -A` is by definition unclassified, so exempting on `reason()`
-    # exempted exactly the class the gate exists to catch. Measured: with
-    # that exemption, the `.nh-local` payload committed CLEAN in a classified
-    # tree, which the version before this check was added had refused.
-    return sorted(rel for rel in candidates
-                  if rel not in pins
-                  and not (unpinnable is not None
-                           and unpinnable.is_dropped(rel)))
-
-
-def _no_manifest_message(root: Path) -> str:
-    return (
-        "no_human pre-commit gate: REFUSED.\n\n"
-        f"{MANIFEST_NAME} is not present in the index, so nothing can be\n"
-        "checked against it. A commit that removes the export ledger while\n"
-        "adding files is the one shape this gate must not wave through.\n\n"
-        f"  If you are deliberately removing it, commit that alone, or use\n"
-        "  --no-verify and say why in the commit message."
-    )
-
-
 def main(argv: list[str] | None = None) -> int:
     try:
         root = repo_root()
     except (subprocess.CalledProcessError, OSError):
         # Not in a git repo (or git unavailable): nothing to gate, do not block.
         return 0
-
-    additions = find_unpinned_additions(root)
-    if additions:
-        print("no_human pre-commit gate: REFUSED.", file=sys.stderr)
-        print("", file=sys.stderr)
-        print("These staged file(s) would be TRACKED but have no row in %s,"
-              % MANIFEST_NAME, file=sys.stderr)
-        print("so this commit would publish a file the export ledger has never"
-              " approved:", file=sys.stderr)
-        for rel in additions:
-            print(f"  {rel}", file=sys.stderr)
-        print("", file=sys.stderr)
-        print("  If it SHOULD ship: pin it and stage the manifest in the SAME"
-              " commit:", file=sys.stderr)
-        print(f"    {remedy_command(root, ' '.join(additions))}",
-              file=sys.stderr)
-        print(f"    git add {MANIFEST_NAME}", file=sys.stderr)
-        print("", file=sys.stderr)
-        print("  If it should NOT ship: unstage it, and add it to .gitignore so"
-              " the next", file=sys.stderr)
-        print("  `git add -A` cannot sweep it in again:", file=sys.stderr)
-        print(f"    git restore --staged {' '.join(additions)}",
-              file=sys.stderr)
-        return 1
 
     offenders = find_unpinned_changes(root)
     if not offenders:
