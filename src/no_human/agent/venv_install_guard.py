@@ -1358,6 +1358,32 @@ def _denial_reason_for_reading(
     outside = sorted(c for c in candidates if not _is_within(c, cwd_real))
     if outside:
         alt = os.path.join(cwd_real, ".venv", "bin", "python")
+        # The VERDICT is the same either way -- fail-closed on an
+        # indeterminate read is this module's standing rule -- but the
+        # SENTENCE must not be. When the installer this denial rests on is
+        # one whose own file type could not be determined, "resolves to X"
+        # is a claim resolution did not establish: a POSIX shell skips an
+        # EACCES entry and keeps walking, so the binary named here is one
+        # the shell would not execute, and the user is handed a false fact
+        # to act on (#338). Say the true thing instead, in the wording the
+        # `_UNRESOLVABLE_CHARS` branch above already uses for the analogous
+        # case -- the target could not be established.
+        #
+        # Derived here rather than threaded out of `_resolve_installer`,
+        # whose contract (a path, or None) is what a dozen tests pin and
+        # what `_effective_prefixes` consumes. This asks the same probe the
+        # resolver asked, about the same file, and nothing else moves.
+        if any(_probe_is_file(i) is None for i in installers):
+            unreadable = sorted(i for i in installers if _probe_is_file(i) is None)
+            return (
+                f"cannot verify this install's target: {unreadable[0]} "
+                f"could not be read (permission denied?), so the effective "
+                f"install location cannot be resolved before the command "
+                f"runs — and what could be read points outside this "
+                f"session's worktree ({cwd_real}). Spell the literal path "
+                f"instead (your worktree's own .venv), e.g. "
+                f"`{alt} -m pip install ...`."
+            )
         return (
             f"install blocked: resolves to {outside[0]}, outside this "
             f"session's worktree ({cwd_real}) — not the worktree's own "
