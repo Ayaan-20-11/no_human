@@ -2094,7 +2094,12 @@ FROZEN_FILE_LINES = {
     # and its explanatory comment -- the hosted-intake gate `email/register.py`
     # reads before forwarding an onboarding address off-machine. Measured on
     # the merge result.
-    "config.py": 3679,
+    # 3657 -> 3667 (+10): `newline="\n"` on `atomic_write_0600` and
+    # `_atomic_write_text` (the CRLF-.env desktop-credential fix) plus the
+    # docstring paragraphs explaining why each write must not let Windows
+    # text-mode translation reintroduce a trailing CRLF. Measured on this
+    # tree.
+    "config.py": 3689,
     # +61: the tamper-adjudication one-bounded-retry contract (mechanical-
     # failure classification + the extracted `_review_tamper_adjudication`
     # helper that keeps `AdversarialReviewer.review` itself under the
