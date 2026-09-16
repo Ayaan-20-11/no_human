@@ -2396,7 +2396,14 @@ FROZEN_FILE_LINES = {
     # `self.wake.tick` await in the dispatch loop, clarifying that
     # `_CLI_TIMEOUT` bounds only a single `pr_watcher._run_cli` call, not the
     # whole sequential sweep over parked tasks. No behavior change.
-    "core/scheduler.py": 3205,
+    # 3196 -> 3244 (+48): the durable `task_crashed` event's `traceback` field —
+    # module-level `_traceback_excerpt` (formats `exc.__traceback__`, never
+    # `format_exc()`, tail-capped at `_TRACEBACK_EXCERPT_CAP` with the same
+    # `_TRUNCATION_MARKER` `stderr_excerpt` uses, capping the exception's own
+    # final message line first so it cannot crowd the raising frame out of
+    # the kept tail) plus its call lines in `_run`'s crash handler. Measured
+    # on this tree with the scanner below.
+    "core/scheduler.py": 3253,
 }
 
 
