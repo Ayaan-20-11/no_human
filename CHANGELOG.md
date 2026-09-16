@@ -6,7 +6,60 @@ All notable changes to no_human. The format follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-09-17
+
+### Added
+- **Onboarding email, and a welcome from the founder.** The setup wizard now
+  asks for your email; official builds forward it to the hosted registration
+  intake over HTTPS (the endpoint is stamped into the build, `email/register.py`
+  posts it), which stores it and sends a one-time welcome — and nothing more
+  without you. A build you compile yourself has no endpoint stamped and forwards
+  nothing.
+- **The review gate runs outside a running server.** Use it from a session
+  as a plugin skill (review a branch with no server), or on a pull request in
+  your own repository as a GitHub Action — a pull request from a fork is
+  skipped before any credential is read, so untrusted head code never runs
+  next to a secret. The Action judges the diff alone: unlike a local run it
+  collects no lint, wiring or type evidence and does not explore the
+  repository, and it refuses a diff over the reviewer's single-turn cap rather
+  than review a truncated prefix.
+- **The running version is shown in About, resolved from one source**, so the
+  two version surfaces cannot drift.
+- **`nh task add --follows` records that one task supersedes another**, and
+  `nh approve` warns off a superseded task.
+
+### Changed
+- **Wiring evidence reads JS/TS and class bodies, not just Python module top
+  level** (issue #114 phase 4). The reference half of the check was always
+  language-agnostic — `git grep -w` reads bytes — but the declaration half was
+  `ast.parse` over `.py` files at module top level, so a diff in any other
+  language and any method added to a class were structurally invisible. Over
+  the 300 most recent non-merge commits on `main`, 25% of the commits that
+  touch code touch something other than Python and 20% of the Python symbols
+  added sit inside a class. Declarations now come from a new
+  `review/symbols.py`: Python at module level and in class bodies, reported by
+  qualified name (`Store.recompute_totals`), plus `export`ed module-level
+  declarations in `.js/.jsx/.mjs/.cjs/.ts/.tsx` read by a scanner that blanks
+  comments and string literals first. A `def` inside a function, an unexported
+  JS binding and a dunder method are deliberately not collected — the first two
+  are file-private by construction, and the language calls the third, so no
+  reference search could find the call that does exist. The whole pass now runs
+  under one deadline instead of a per-subprocess timeout (with a `git grep` per
+  name, a per-call timeout bounded nothing in aggregate) and returns the
+  symbols it had already decided when the budget runs out. Still advisory, and
+  every failure still resolves toward silence rather than toward an accusation.
 ### Fixed
+- **Approve & merge works in the shipped desktop app again.** In the frozen
+  build the merge gate shelled out through the packaged binary as if it were a
+  Python interpreter, so every `nh approve` and every board **Approve** failed
+  at the test step, and command output was decoded with the host locale rather
+  than UTF-8. The gate now resolves a real interpreter and decodes as UTF-8,
+  end to end — on your machine and in the frozen build.
+- **A non-Latin task title (Hebrew, Cyrillic, Japanese) no longer crashes the
+  run at commit on Windows.** `GitRepo`'s git reads decoded with the host
+  codepage (cp1255 and the like), which cannot decode git's UTF-8 output, so the
+  attempt died at the commit step and stranded the work on its branch with no
+  PR. All sixteen text-mode git subprocess calls now decode as UTF-8.
 - **Windows: codebase context was silently lost on every task** —
   `CodebaseSource._search` parsed `rg`/`grep` output as `path:line:text` via
   `line.split(":", 2)`. A Windows absolute path carries a drive-letter colon
@@ -48,29 +101,6 @@ All notable changes to no_human. The format follows
   every other `_run_cli` failure already produces, applied uniformly to
   read- and write-side (`gh api POST/PATCH`, `glab api --method POST/PUT`)
   calls alike.
-
-### Changed
-- **Wiring evidence reads JS/TS and class bodies, not just Python module top
-  level** (issue #114 phase 4). The reference half of the check was always
-  language-agnostic — `git grep -w` reads bytes — but the declaration half was
-  `ast.parse` over `.py` files at module top level, so a diff in any other
-  language and any method added to a class were structurally invisible. Over
-  the 300 most recent non-merge commits on `main`, 25% of the commits that
-  touch code touch something other than Python and 20% of the Python symbols
-  added sit inside a class. Declarations now come from a new
-  `review/symbols.py`: Python at module level and in class bodies, reported by
-  qualified name (`Store.recompute_totals`), plus `export`ed module-level
-  declarations in `.js/.jsx/.mjs/.cjs/.ts/.tsx` read by a scanner that blanks
-  comments and string literals first. A `def` inside a function, an unexported
-  JS binding and a dunder method are deliberately not collected — the first two
-  are file-private by construction, and the language calls the third, so no
-  reference search could find the call that does exist. The whole pass now runs
-  under one deadline instead of a per-subprocess timeout (with a `git grep` per
-  name, a per-call timeout bounded nothing in aggregate) and returns the
-  symbols it had already decided when the budget runs out. Still advisory, and
-  every failure still resolves toward silence rather than toward an accusation.
-
-### Fixed
 - `nhCanAutoUpdate` was computed only from the macOS signing plan, then
   stamped into the single `extraMetadata` block shared by every
   electron-builder platform target — so a credentialed Apple environment
@@ -103,6 +133,56 @@ All notable changes to no_human. The format follows
   and PATH-walk branches, and the `uv`/`uvx` exclusion in
   `_effective_prefixes`); `_basename` itself is unchanged and still used at
   every call site that reads a raw command token.
+- **The desktop app read no credential from a CRLF `.env`** — `tokenStore.mjs`
+  split on `"\n"`, so on a CRLF file every line kept a trailing `\r`; the
+  unanchored matcher's `$` then demanded end-of-string and the `\r` made the
+  whole line fail to match, so the entry was silently dropped rather than
+  mis-trimmed. Splitting on `/\r?\n/` is the fix — `.trim()` would not have been.
+- **A frozen build's pytest rescue re-invoked the `nh` binary instead of
+  Python** — when a bare `pytest` could not import pytest, the test runner
+  retried with `sys.executable -m pytest`, but in the PyInstaller desktop build
+  `sys.executable` *is* the frozen `nh` binary, so the rescue re-entered the CLI
+  and died on `No such option '-m'` — it fired exactly when it was needed and
+  structurally could not work. It now resolves a real interpreter through the
+  shared `proc.real_python` resolver, and fails closed when none exists rather
+  than manufacturing a result.
+- **A review could pass while every blocking finding was silently demoted** —
+  when the citation root disagreed with the reviewed diff, the gate discarded the
+  findings instead of the mismatched root, turning a FAIL into a PASS with no
+  signal that it had happened.
+- **A task whose branch was rewritten after being pushed could never deliver**
+  — a rebase, squash or manual amend leaves the remote holding a commit the new
+  local tip does not descend from, and delivery correctly refuses rather than
+  force-pushing; with no recovery path, every following attempt reproduced the
+  same reviewed, green diff and hit the same refusal, looping without ever
+  reaching a human or a merged PR. The work is now recut onto a fresh,
+  never-pushed branch name at the already-reviewed sha, which is trivially a
+  fast-forward.
+- **The tamper guard reported a fake fixture that did not exist** — a file with
+  one autouse fixture that patched nothing, plus ordinary per-test `monkeypatch`
+  arguments elsewhere, was read as "the fixture did the patching" and flagged as
+  tampered. A patch is now attributed to the scope that actually performs it, and
+  a skip marker inside a string literal is no longer counted as a real skip; a
+  genuine autouse-fixture cheat is still caught.
+- **The replay leak harness could pass for the wrong reason** — its gzip decode
+  path could silently degrade while the leak checks kept passing against a
+  haystack that never inflated. It now gates on its own decompression health and
+  carries a DOM-only positive control, replacing an unenforced INFO line with
+  real assertions.
+- **A scheduler crash recorded no traceback** — the one event that needs it kept
+  only a message, so a pool crash left nothing to diagnose. The traceback is now
+  captured on the crash event under the same excerpt cap as the existing stderr
+  excerpt, so one runaway trace cannot balloon the durable row.
+- **The scoping grill re-asked a question the user had already answered** —
+  including rewordings and narrowed variants seeking the same decision, spending
+  one of the user's limited intake rounds and reading as though their answer had
+  been ignored. An answer that declines to specify is now treated as a stop
+  signal rather than an invitation to rephrase.
+- **The P1 history gate's hit count is now readable** — the full-history scan
+  reported its blob hits behind two independent truncations (a 200-per-group
+  print cap and a 600-character hook log), so nobody could separate genuine leaks
+  from broad-shape matches against contributor identities and test fixtures;
+  `scripts/history_gate_hit_report.py` classifies them.
 
 ## [0.2.3] — 2026-09-14
 
