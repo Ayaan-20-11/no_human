@@ -461,6 +461,16 @@ config key that turns it on and the default that keeps it off.
   never blocks or fails the onboarding response, and neither the address nor
   any exception detail is logged or returned — only a closed-vocabulary
   status string.
+- **The `no_human` review-gate GitHub Action.** This sends nothing on its own —
+  it is a separate, opt-in distribution surface (`action.yml`) that only runs
+  inside a workflow a repository's own maintainers add, and only on that
+  repository's `pull_request` jobs. Once added, the sole outbound call is a
+  read/create/update of the Action's own single PR comment against your
+  GitHub (or GHE) host's REST API — never a merge, review, push, or any other
+  endpoint, which `_assert_write_allowed` enforces in code
+  (`ci_action/github.py`). Model calls go out on the `credential` input you
+  supply to the job, exactly like any other coder/reviewer session in this
+  document.
 - **Welcome email (Resend).** Gated on an **environment variable**, not a
   config key: `_default_transport()` (`email/send.py`) constructs a
   `ResendTransport` only when `RESEND_API_KEY` is present in
