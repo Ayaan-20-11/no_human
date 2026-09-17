@@ -93,6 +93,44 @@ def test_normalize_maps_fields_and_criteria(monkeypatch):
     assert task.context["jira"]["labels"] == ["backend"]
 
 
+def test_normalize_extracts_plain_bullets_from_acceptance_criteria(monkeypatch):
+    monkeypatch.setenv("JIRA_API_TOKEN", "t")
+    task = JiraAdapter(_cfg()).normalize({"key": "PROJ-10", "fields": {
+        "summary": "Plain criteria",
+        "description": {"type": "doc", "content": [
+            {"type": "heading", "attrs": {"level": 2},
+             "content": [{"type": "text", "text": "Acceptance criteria"}]},
+            {"type": "bulletList", "content": [
+                {"type": "listItem", "content": [
+                    {"type": "paragraph", "content": [
+                        {"type": "text", "text": "retries 3x"}]}]},
+                {"type": "listItem", "content": [
+                    {"type": "paragraph", "content": [
+                        {"type": "text", "text": "logs failures"}]}]},
+            ]},
+        ]}}})
+    assert task.acceptance_criteria == ["retries 3x", "logs failures"]
+
+
+def test_normalize_warns_for_an_empty_acceptance_criteria_heading(monkeypatch, caplog):
+    monkeypatch.setenv("JIRA_API_TOKEN", "t")
+    with caplog.at_level(logging.WARNING, logger="no_human.intake.criteria"):
+        task = JiraAdapter(_cfg()).normalize({"key": "PROJ-11", "fields": {
+            "summary": "Missing criteria", "description": "## Acceptance criteria\nText only"}})
+    assert task.acceptance_criteria == []
+    assert "Jira issue PROJ-11" in caplog.text
+    assert "--criteria" in caplog.text
+
+
+def test_normalize_leaves_missing_criteria_silent(monkeypatch, caplog):
+    monkeypatch.setenv("JIRA_API_TOKEN", "t")
+    with caplog.at_level(logging.WARNING, logger="no_human.intake.criteria"):
+        task = JiraAdapter(_cfg()).normalize({"key": "PROJ-12", "fields": {
+            "summary": "No criteria", "description": "Background only"}})
+    assert task.acceptance_criteria == []
+    assert not caplog.records
+
+
 def test_normalize_handles_adf_description(monkeypatch):
     monkeypatch.setenv("JIRA_API_TOKEN", "t")
     adf = {"type": "doc", "content": [
