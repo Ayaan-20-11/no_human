@@ -876,3 +876,25 @@ async def test_poller_done_note_does_not_status_check(monkeypatch, tmp_path):
         assert saved.context["jira"]["nh_synced_status"] == "done"
     finally:
         await store.close()
+
+
+def test_normalize_reads_an_acceptance_heading_that_follows_a_paragraph(monkeypatch):
+    """The ADF flattener emits `## ` and `- ` as PREFIXES, so the line-based
+    parser only works if each block already starts a line. A heading as the
+    document's first node cannot show that; one that follows a paragraph can.
+    """
+    monkeypatch.setenv("JIRA_API_TOKEN", "t")
+    task = JiraAdapter(_cfg()).normalize({"key": "PROJ-13", "fields": {
+        "summary": "Heading after prose",
+        "description": {"type": "doc", "content": [
+            {"type": "paragraph", "content": [
+                {"type": "text", "text": "Some background first."}]},
+            {"type": "heading", "attrs": {"level": 2},
+             "content": [{"type": "text", "text": "Acceptance criteria"}]},
+            {"type": "bulletList", "content": [
+                {"type": "listItem", "content": [
+                    {"type": "paragraph", "content": [
+                        {"type": "text", "text": "retries 3x"}]}]},
+            ]},
+        ]}}})
+    assert task.acceptance_criteria == ["retries 3x"]

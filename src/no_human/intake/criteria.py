@@ -102,15 +102,18 @@ def extract_acceptance_criteria(text: str, issue_name: str) -> list[str]:
         if criteria := _items(body):
             return criteria
 
-    # Only after every section came up empty: this is the body-wide sweep the
-    # adapters did before, and it still serves a checkbox-only issue and an
-    # issue whose acceptance-criteria heading is an unfilled template stub.
-    # It loses only to a section that actually has items, which is the whole
-    # point — an unrelated checklist must not outrank written criteria.
-    checkboxes = [m.group(1) for _, line in visible
-                  if (m := _CHECKLIST_ITEM.match(line))]
-    if checkboxes:
-        return checkboxes
+    # The body-wide sweep the adapters did before, and ONLY when the body
+    # names no acceptance-criteria section at all. Running it whenever a
+    # section merely came up empty reopens the case this whole change is
+    # about: a section holding prose, an unrelated "Definition of done"
+    # checklist below it, and the checklist silently adopted as the criteria.
+    # A section that names itself and yields nothing is the case #511 asks to
+    # WARN about, not to guess around.
+    if not sections:
+        checkboxes = [m.group(1) for _, line in visible
+                      if (m := _CHECKLIST_ITEM.match(line))]
+        if checkboxes:
+            return checkboxes
 
     if sections or any(_ACCEPTANCE_MENTION.match(line) for _, line in visible):
         log.warning(

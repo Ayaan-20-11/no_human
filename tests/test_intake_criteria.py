@@ -59,10 +59,23 @@ def test_a_body_with_only_checkboxes_is_unchanged():
     assert extract("Intro\n- [ ] one\n- [x] two\n") == ["one", "two"]
 
 
-def test_an_empty_heading_falls_back_to_the_body_checkboxes():
-    """An unfilled template stub must not cost the issue its checklist."""
-    body = "## Acceptance criteria\n\n## Tasks\n- [ ] ship it\n"
-    assert extract(body) == ["ship it"]
+@pytest.mark.parametrize("section_body", [
+    "",                          # an unfilled template stub
+    "See the linked design doc.",   # a section that holds only prose
+])
+def test_a_section_that_yields_nothing_warns_rather_than_borrowing(section_body, caplog):
+    """The body-wide checkbox sweep runs only when the body names no
+    acceptance-criteria section AT ALL. Running it whenever a section merely
+    came up empty reopens the case this change exists to close: a section
+    holding prose, an unrelated checklist below it, and the checklist quietly
+    adopted as the criteria. Wrong criteria are graded as if they were real;
+    #511's third criterion asks for a warning here, not a guess."""
+    body = (f"## Acceptance criteria\n{section_body}\n"
+            "## Definition of done\n- [x] PR raised\n- [ ] notes updated\n")
+    with caplog.at_level(logging.WARNING, logger="no_human.intake.criteria"):
+        assert extract(body, "GitHub issue o/r#9") == []
+    assert "GitHub issue o/r#9" in caplog.text
+    assert "--criteria" in caplog.text
 
 
 def test_a_later_heading_is_consulted_when_the_first_is_empty():
