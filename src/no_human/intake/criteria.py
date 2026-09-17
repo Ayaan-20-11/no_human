@@ -8,42 +8,112 @@ import re
 
 log = logging.getLogger("no_human.intake.criteria")
 
-_CHECKLIST_ITEM = re.compile(r"^\s*[-*]\s*\[[ xX]\]\s*(.+)$")
-_HEADING = re.compile(
-    r"^\s*(?P<hashes>#{1,6})\s*acceptance\s+criteria\s*#*\s*$", re.IGNORECASE)
-_ANY_HEADING = re.compile(r"^\s*(?P<hashes>#{1,6})\s+")
-_BULLET = re.compile(r"^\s*[-*]\s+(.+?)\s*$")
+# ATX headings need a space after the hashes, so `##Notes` is a paragraph and
+# must not close a section. One pattern decides what a heading is, for both
+# "does this open the acceptance-criteria section" and "does this close it";
+# two spellings disagreeing is how `##Notes` came to be a closer in one place
+# and not the other.
+_HEADING = re.compile(r"^\s{0,3}(?P<hashes>#{1,6})\s+(?P<title>.*?)\s*#*\s*$")
+_FENCE = re.compile(r"^\s*(?:```|~~~)")
+
+# The heading TEXT only has to start with the phrase: "Acceptance criteria
+# (recorded API fixtures)" and "Acceptance criteria:" are both ordinary here.
+_ACCEPTANCE = re.compile(r"^acceptance\s+criteria\b", re.IGNORECASE)
+
+# The safety net is deliberately looser than the parser: a bold or bare
+# "Acceptance criteria" line is not a heading we can scope, but a body that
+# writes one and yields nothing is exactly the silently-ungradable task this
+# warning exists to prevent.
+_ACCEPTANCE_MENTION = re.compile(
+    r"^\s{0,3}(?:#{1,6}\s+|\*\*|__)?\s*acceptance\s+criteria\b", re.IGNORECASE)
+
+_CHECKLIST_ITEM = re.compile(r"^\s*[-*+]\s*\[[ xX]\]\s*(.+?)\s*$")
+_BULLET = re.compile(r"^\s*[-*+]\s+(.+?)\s*$")
+_ORDERED = re.compile(r"^\s*\d{1,3}[.)]\s+(.+?)\s*$")
+
+
+def _outside_fences(lines: list[str]) -> list[tuple[int, str]]:
+    """`(index, line)` for every line outside a fenced code block.
+
+    Issue bodies here routinely carry ``` blocks holding diffs and shell
+    transcripts. Their `- ` lines are not criteria and their `#` lines are not
+    headings, so a section that contains one would otherwise both gain junk
+    items and end early.
+    """
+    out: list[tuple[int, str]] = []
+    fenced = False
+    for index, line in enumerate(lines):
+        if _FENCE.match(line):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append((index, line))
+    return out
+
+
+def _items(section: list[str]) -> list[str]:
+    """Criteria from one section body, checkboxes first.
+
+    Checkboxes stay authoritative wherever both appear, which is the format
+    the existing imported tasks were written in. Plain and numbered lists are
+    the same kind of claim and are read together, in document order, so a
+    template that mixes them does not silently drop half.
+    """
+    checklist = [m.group(1) for line in section if (m := _CHECKLIST_ITEM.match(line))]
+    if checklist:
+        return checklist
+    items: list[str] = []
+    for line in section:
+        if match := (_BULLET.match(line) or _ORDERED.match(line)):
+            items.append(match.group(1))
+    return items
 
 
 def extract_acceptance_criteria(text: str, issue_name: str) -> list[str]:
-    """Extract checkboxes, or plain bullets from an acceptance-criteria section.
+    """Criteria from an issue body: the acceptance-criteria section if there is
+    one, otherwise the body's checkboxes.
 
-    Checkboxes remain the authoritative format wherever they occur, preserving
-    the behavior that existing imported tasks rely on.  The section fallback
-    serves repositories whose issue template uses ordinary Markdown bullets.
+    The SECTION wins when it exists. A body often carries an unrelated checklist
+    — a Jira "Definition of done", a contributor's own to-do list — and reading
+    the whole body for checkboxes lets that list speak for criteria written in
+    plain bullets under the heading. Falling back to a body-wide sweep only when
+    there is no section keeps a checkbox-only issue ingesting as it always has.
     """
     lines = (text or "").splitlines()
-    checklist = [match.group(1).strip() for line in lines
-                 if (match := _CHECKLIST_ITEM.match(line))]
-    if checklist:
-        return checklist
+    visible = _outside_fences(lines)
 
-    for index, line in enumerate(lines):
+    sections: list[list[str]] = []
+    for position, (_, line) in enumerate(visible):
         heading = _HEADING.match(line)
-        if not heading:
+        if not heading or not _ACCEPTANCE.match(heading.group("title")):
             continue
         level = len(heading.group("hashes"))
-        criteria: list[str] = []
-        for section_line in lines[index + 1:]:
-            next_heading = _ANY_HEADING.match(section_line)
-            if next_heading and len(next_heading.group("hashes")) <= level:
+        body: list[str] = []
+        for _, section_line in visible[position + 1:]:
+            closing = _HEADING.match(section_line)
+            if closing and len(closing.group("hashes")) <= level:
                 break
-            if bullet := _BULLET.match(section_line):
-                criteria.append(bullet.group(1).strip())
-        if criteria:
+            body.append(section_line)
+        sections.append(body)
+
+    # Every section, not just the first: an issue template's empty stub heading
+    # must not hide a filled-in one further down.
+    for body in sections:
+        if criteria := _items(body):
             return criteria
+
+    # Only after every section came up empty: this is the body-wide sweep the
+    # adapters did before, and it still serves a checkbox-only issue and an
+    # issue whose acceptance-criteria heading is an unfilled template stub.
+    # It loses only to a section that actually has items, which is the whole
+    # point — an unrelated checklist must not outrank written criteria.
+    checkboxes = [m.group(1) for _, line in visible
+                  if (m := _CHECKLIST_ITEM.match(line))]
+    if checkboxes:
+        return checkboxes
+
+    if sections or any(_ACCEPTANCE_MENTION.match(line) for _, line in visible):
         log.warning(
-            "%s has an Acceptance criteria heading but no extractable criteria; "
+            "%s names acceptance criteria but none could be extracted; "
             "pass --criteria explicitly.", issue_name)
-        return []
     return []
