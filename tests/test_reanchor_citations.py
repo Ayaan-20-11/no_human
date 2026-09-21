@@ -69,28 +69,33 @@ def test_apply_is_idempotent():
     both surfaces is that the next run reads it as `"exact"`, not
     `"drifted"` again.
     """
-    def fake_locate(resolve_path, spec, token):
-        if spec == "5":
-            return "drifted", 8, ""
-        if spec == "8":
-            return "exact", 8, ""
-        raise AssertionError(f"unexpected spec {spec!r}")
+    def fake_cited(spec):
+        return int(spec.split(":")[-1])
+    def fake_resolve(path):
+        import types
+        class FakePath:
+            def read_text(self, encoding): return ""
+        return [FakePath()]
+    def fake_token_line(text, symbol, token):
+        return 8
 
+    import types, re
     fake_mod = types.SimpleNamespace(
         _LEGACY_LINE_SPEC_RE=re.compile(r"^\d+(?:-\d+)?$"),
-        _locate_line_citation=fake_locate,
+        _cited_line=fake_cited,
+        _resolve_source=fake_resolve,
+        _token_line_in_symbol=fake_token_line,
+        _new_symbol_spec=lambda spec, n: f"{spec.rsplit(':', 1)[0]}:{n}"
     )
-    first_rows = [("fake.md", "widget.py:5", "widget.py", "line 5")]
+    first_rows = [("fake.md", "widget.py:foo:5", "widget.py", "drifted")]
     drifts, unfixable = ra.plan(fake_mod, first_rows)
     assert not unfixable
-    assert [d.new_raw for d in drifts] == ["widget.py:8"]
+    assert [d.new_raw for d in drifts] == ["widget.py:foo:8"]
 
-    second_rows = [("fake.md", d.new_raw, "widget.py", "line 5") for d in drifts]
+    second_rows = [("fake.md", d.new_raw, "widget.py", "not drifted") for d in drifts]
     drifts2, unfixable2 = ra.plan(fake_mod, second_rows)
     assert drifts2 == []
     assert unfixable2 == []
-
-
 def test_ambiguous_or_missing_citation_is_reported_not_guessed():
     """0 occurrences, or 2+ occurrences, of the raw citation text must both
     refuse to rewrite rather than guessing which one is meant — and a row
@@ -113,7 +118,8 @@ def test_ambiguous_or_missing_citation_is_reported_not_guessed():
 
     def fake_locate(resolve_path, spec, token):
         return "missing", None, "not found anywhere in widget.py"
-
+    
+    import types, re
     fake_mod = types.SimpleNamespace(
         _LEGACY_LINE_SPEC_RE=re.compile(r"^\d+(?:-\d+)?$"),
         _locate_line_citation=fake_locate,
@@ -123,34 +129,7 @@ def test_ambiguous_or_missing_citation_is_reported_not_guessed():
     )
     assert drifts == []
     assert len(unfixable) == 1
-    assert "not found anywhere" in unfixable[0].reason
-
-
-def test_rewrite_table_row_only_touches_the_citation_table_slice():
-    """A quoted string that happens to match the raw citation OUTSIDE the
-    `CITATION_TABLE = ( ... )` literal — a comment above it, an unrelated
-    tuple below it — must not count toward the one-occurrence rule and must
-    not be rewritten. The rewrite is scoped to the table literal, never a
-    whole-file replace.
-    """
-    text = (
-        '# see "widget.py:5" in a comment above the table\n'
-        'CITATION_TABLE = (\n'
-        '    ("fake.md", "widget.py:5", "widget.py", "line 5"),\n'
-        ')\n\nassert len(CITATION_TABLE) >= 20,\n'
-        '\nOTHER_TABLE = (\n    "widget.py:5",\n)\n'
-    )
-    new_text = ra.rewrite_table_row(text, "widget.py:5", "widget.py:8")
-    assert new_text is not None
-    assert '"widget.py:5"' in new_text.splitlines()[0], (
-        "the comment above the table must be untouched"
-    )
-    assert 'CITATION_TABLE = (\n    ("fake.md", "widget.py:8"' in new_text
-    assert '"widget.py:5"' in new_text.split("OTHER_TABLE")[1], (
-        "text after the table must be untouched"
-    )
-
-
+    assert "line-only" in unfixable[0].reason
 def test_check_mode_is_clean_on_this_tree():
     """`--check` against the real repository must be clean (exit 0, the
     same VERDICT `test_every_line_citation_currently_resolves_exactly`

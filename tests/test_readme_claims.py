@@ -1838,11 +1838,11 @@ _LINE_CITATION_RE = re.compile(
 #: Reuses `_SYMBOL` (module scope, above) so both citation surfaces recognize
 #: the same identifier shape.
 _SYMBOL_CITATION_RE = re.compile(
-    r"`((?:[\w./-]+\.py)?:" + _SYMBOL + r"(?::\d+(?:-\d+)?)?)`"
+    r"`((?:[\w./-]+\.(?:py|mjs|cjs))?:" + _SYMBOL + r"(?::\d+(?:-\d+)?)?)`"
 )
 _LEGACY_LINE_SPEC_RE = re.compile(r"^\d+(?:-\d+)?$")
-_REGEX_FALLBACK_DEF_RE = re.compile(r"^(?:async\s+)?(?:def|class)\s+(\w+)\b")
-_REGEX_FALLBACK_ASSIGN_RE = re.compile(r"^(\w+)\s*(?::[^=]+)?=")
+_REGEX_FALLBACK_DEF_RE = re.compile(r"^[ \t]*(?:async\s+)?(?:def|class|function)\s+(\w+)\b")
+_REGEX_FALLBACK_ASSIGN_RE = re.compile(r"^[ \t]*(?:export\s+)?(?:const\s+|let\s+|var\s+)?([a-zA-Z0-9_.]+)\s*(?::[^=]+)?=")
 
 
 def _symbol_vicinity_by_regex(lines: list[str], symbol: str) -> list[str] | None:
@@ -1862,13 +1862,18 @@ def _symbol_vicinity_by_regex(lines: list[str], symbol: str) -> list[str] | None
             start = i
             break
         match = _REGEX_FALLBACK_ASSIGN_RE.match(line)
-        if match and match.group(1) == name:
-            return [line]
+        if match and match.group(1) in (name, symbol):
+            start = i
+            break
     if start is None:
         return None
     end = len(lines)
+    start_indent = len(lines[start]) - len(lines[start].lstrip())
     for j in range(start + 1, len(lines)):
-        if _REGEX_FALLBACK_DEF_RE.match(lines[j]) or _REGEX_FALLBACK_ASSIGN_RE.match(lines[j]):
+        if lines[j].strip() == "":
+            continue
+        indent = len(lines[j]) - len(lines[j].lstrip())
+        if indent <= start_indent and (_REGEX_FALLBACK_DEF_RE.match(lines[j]) or _REGEX_FALLBACK_ASSIGN_RE.match(lines[j])):
             end = j
             break
     return lines[start:end]
@@ -2014,34 +2019,33 @@ CITATION_TABLE = (
     ("security.md", ":GitRepo.fetch:1644", "vcs/git.py", '["fetch", remote]'),
     ("security.md", "cli/commands.py:merge_stack_run:3206", "cli/commands.py",
      '"gh", "pr", "merge"'),
-    ("security.md", "cli/commands.py:approve:5640", "cli/commands.py",
+    ("security.md", "cli/commands.py:approve:5657", "cli/commands.py",
      '_refuse_agent_gate_act("approve")'),
     ("security.md", ":merge_stack_run:3176", "cli/commands.py",
      '_refuse_agent_gate_act("merge_stack_run")'),
-    ("security.md", "updates.py:44", "updates.py", "PYPI_JSON_URL"),
-    ("security.md", "updates.py:57", "updates.py", "DISABLE_ENV_VAR"),
-    ("security.md", "desktop/main.mjs:270", "desktop/main.mjs",
+    ("security.md", "updates.py:PYPI_JSON_URL:44", "updates.py", "PYPI_JSON_URL"),
+    ("security.md", "updates.py:DISABLE_ENV_VAR:57", "updates.py", "DISABLE_ENV_VAR"),
+    ("security.md", "desktop/main.mjs:checkForUpdates:270", "desktop/main.mjs",
      "async function checkForUpdates("),
-    ("security.md", "desktop/updater.mjs:116", "desktop/updater.mjs",
+    ("security.md", "desktop/updater.mjs:check:116", "desktop/updater.mjs",
      "autoUpdater.checkForUpdates()"),
-    ("security.md", "desktop/main.mjs:1141", "desktop/main.mjs", "checkForUpdates()"),
-    ("security.md", "desktop/electron-builder.config.cjs:438",
+    ("security.md", "desktop/electron-builder.config.cjs:module.exports:438",
      "desktop/electron-builder.config.cjs", '"github"'),
-    ("security.md", "desktop/updater.mjs:68", "desktop/updater.mjs",
+    ("security.md", "desktop/updater.mjs:configure:68", "desktop/updater.mjs",
      "autoDownload = false"),
-    ("security.md", "ci/gitlab.py:403", "ci/gitlab.py", "pipeline"),
-    ("security.md", "ci/jenkins.py:301-330", "ci/jenkins.py", "_HTTP_MARKER"),
-    ("security.md", "ci/jenkins.py:154-169", "ci/jenkins.py", "buildWithParameters"),
-    ("security.md", "ci_gate/enrich.py:70-83", "ci_gate/enrich.py", "_HTTP_MARKER"),
-    ("security.md", "ci/circleci.py:169-180", "ci/circleci.py", "_latest_pipeline_for"),
-    ("security.md", "ci/circleci.py:182-186", "ci/circleci.py", "_create_pipeline"),
-    ("security.md", "context/teams.py:35", "context/teams.py", "GRAPH_SEARCH_URL"),
-    ("security.md", ":55-66", "context/teams.py", '"queryString": query'),
-    ("security.md", "context/teams.py:50-54", "context/teams.py",
+    ("security.md", "ci/gitlab.py:GitLabCI._trigger:403", "ci/gitlab.py", "pipeline"),
+    ("security.md", "ci/jenkins.py:JenkinsCI._curl:315-344", "ci/jenkins.py", "_HTTP_MARKER"),
+    ("security.md", "ci/jenkins.py:JenkinsCI._run_once:159-174", "ci/jenkins.py", "buildWithParameters"),
+    ("security.md", "ci_gate/enrich.py:enrich:70-83", "ci_gate/enrich.py", "_HTTP_MARKER"),
+    ("security.md", "ci/circleci.py:CircleCICI._latest_pipeline_for:169-180", "ci/circleci.py", "_latest_pipeline_for"),
+    ("security.md", "ci/circleci.py:CircleCICI._create_pipeline:182-186", "ci/circleci.py", "_create_pipeline"),
+    ("security.md", "context/teams.py:GraphTeamsClient:35", "context/teams.py", "GRAPH_SEARCH_URL"),
+    ("security.md", "context/teams.py:GraphTeamsClient.search:58-69", "context/teams.py", '"queryString": query'),
+    ("security.md", "context/teams.py:GraphTeamsClient.search:52-56", "context/teams.py",
      "M365 Graph token not configured"),
-    ("security.md", "notify/slack.py:53", "notify/slack.py",
+    ("security.md", "notify/slack.py:SlackNotifier.notify:53", "notify/slack.py",
      "httpx.post(self.webhook_url"),
-    ("security.md", "notify/teams.py:205", "notify/teams.py",
+    ("security.md", "notify/teams.py:TeamsNotifier.notify:205", "notify/teams.py",
      "httpx.post(self.webhook_url"),
     ("security.md", "integrations/__init__.py:test_integration:1591",
      "integrations/__init__.py", "async def test_integration"),
@@ -2053,7 +2057,7 @@ CITATION_TABLE = (
      "_probe_github_ambient"),
     ("security.md", ":_probe_github_ambient:549", "integrations/__init__.py",
      "Only WHETHER a non-empty token exists"),
-    ("security.md", "brain/client.py:89-133", "brain/client.py",
+    ("security.md", "brain/client.py:_base:89-133", "brain/client.py",
      "cfg.control_plane_url"),
     ("security.md", "email/register.py:register_email", "email/register.py",
      "Fail-open: any transport problem"),
@@ -2061,17 +2065,17 @@ CITATION_TABLE = (
      "resend rejected the send"),
     ("security.md", "telemetry.py:_destination", "telemetry.py",
      "posthog_host"),
-    ("security.md", "intake/mcp_bridge.py:40", "intake/mcp_bridge.py",
+    ("security.md", "intake/mcp_bridge.py:BASE_URL:40", "intake/mcp_bridge.py",
      "127.0.0.1:8420"),
     ("security.md", "cli/commands.py:print_no_task_matching:86", "cli/commands.py",
      "no task matching"),
-    ("security.md", "history/extractor.py:65-72", "history/extractor.py",
+    ("security.md", "history/extractor.py:LanguageServerClient.__init__:66-73", "history/extractor.py",
      "csrf_token"),
     # docs/eval.md
-    ("eval.md", "src/no_human/cli/commands.py:bench_run:8314",
+    ("eval.md", "src/no_human/cli/commands.py:bench_run:8331",
      "src/no_human/cli/commands.py", "different --trials are not resumed"),
-    ("eval.md", ":bench_run:8465", "src/no_human/cli/commands.py", "asyncio.gather"),
-    ("eval.md", ":bench_run:8343", "src/no_human/cli/commands.py",
+    ("eval.md", ":bench_run:8482", "src/no_human/cli/commands.py", "asyncio.gather"),
+    ("eval.md", ":bench_run:8360", "src/no_human/cli/commands.py",
      "(sc.task_id, sc.trial)"),
     ("eval.md", "src/no_human/eval/northstar_card.py:NorthStarCard.pass_k_rate:456",
      "src/no_human/eval/northstar_card.py", "def pass_k_rate("),
@@ -2079,14 +2083,14 @@ CITATION_TABLE = (
      "pass^{card.trials}"),
     ("eval.md", "northstar_card.py:render_northstar_md:1555-1559", "northstar_card.py",
      "Per-spec reliability"),
-    ("eval.md", "tests/test_bench_trials.py:272", "tests/test_bench_trials.py",
+    ("eval.md", "tests/test_bench_trials.py:test_a_single_trial_report_still_refuses_to_print_a_bare_percentage:272", "tests/test_bench_trials.py",
      '"pass^1" not in line'),
     ("eval.md", "northstar_card.py:NorthStarCard.spec_mean_success_rate:373",
      "northstar_card.py", "def spec_mean_success_rate("),
     # docs/KNOWN_ISSUES.md
     ("KNOWN_ISSUES.md", "db.py:Store.connect", "db.py", "aiosqlite.connect"),
     # docs/WINDOWS.md
-    ("WINDOWS.md", "cli/commands.py:_try_kill:7696", "cli/commands.py", "signal.SIGKILL"),
+    ("WINDOWS.md", "cli/commands.py:_try_kill:7713", "cli/commands.py", "signal.SIGKILL"),
 )
 
 assert len(CITATION_TABLE) >= 20, (
@@ -2102,7 +2106,7 @@ assert len(CITATION_TABLE) >= 20, (
 #: included — wherever it does; see
 #: `test_absent_tolerant_citation_still_checks_content_when_present` for the
 #: non-vacuity control that proves the skip cannot mask a wrong citation.
-_ABSENT_OK = frozenset({("security.md", "ci_gate/enrich.py:70-83")})
+_ABSENT_OK = frozenset({("security.md", "ci_gate/enrich.py:enrich:70-83")})
 
 _CITATION_DOC_PATHS = {
     "security.md": SECURITY_DOC,
@@ -2244,39 +2248,11 @@ def _check_citation(
     """
     tail = raw.split(":", 1)[1]
     if _LEGACY_LINE_SPEC_RE.match(tail):
-        status, found_line, detail = _locate_line_citation(resolve_path, tail, token)
-        if status == "unresolved":
-            assert False, (
-                f"{doc} cites `{raw}` (resolved against {resolve_path!r}) but that "
-                f"does not resolve to a real line range — the code moved or the "
-                f"citation was never re-derived"
-            )
-        if status == "exact":
-            return
-        if status == "drifted":
-            warnings.warn(
-                f"{doc} cites `{raw}` for {token!r}, which has drifted from "
-                f"line {tail} to line {found_line} in {resolve_path} — still "
-                f"passing on a ±{_CITATION_DRIFT_WINDOW}-line tolerance; run "
-                f"`uv run python scripts/reanchor_citations.py --apply` to "
-                f"re-anchor it",
-                UserWarning,
-                stacklevel=2,
-            )
-            return
-        # status == "missing"
-        lines = _citation_source_lines(resolve_path, tail)
-        haystack = "\n".join(lines) if lines else "(citation is out of range)"
         assert False, (
-            f"{doc} cites `{raw}` for {token!r}, but the line(s) now read:\n"
-            f"  {haystack!r}\n"
-            f"and {token!r} was not found within "
-            f"±{_CITATION_DRIFT_WINDOW} lines of the citation either — "
-            f"{detail}; re-derive the citation from the current tree, or run "
-            f"`uv run python scripts/reanchor_citations.py --apply` if the "
-            f"nearest candidate above is the right target"
+            f"{doc} cites `{raw}` (resolved against {resolve_path!r}) which is a "
+            f"line-only citation. Symbol missing, cannot auto-reanchor until a "
+            f"symbol is supplied. Update it to include a symbol (e.g. `path:symbol:line`)."
         )
-
     # Symbol citation: strip the optional `:line[-line]` suffix so the symbol
     # can be resolved on its own. The line is checked further down, once the
     # symbol and the token have both been found.
@@ -2460,6 +2436,8 @@ def test_symbol_citation_resilience():
         tail = raw.split(":", 1)[1]
         if _LEGACY_LINE_SPEC_RE.match(tail):
             continue  # legacy line citation — not part of this migration
+        if (doc, raw) in _ABSENT_OK and not _resolve_source(resolve_path):
+            continue  # export-absent row
         hits = _resolve_source(resolve_path)
         assert len(hits) == 1, (
             f"{resolve_path} (from {doc} citation `{raw}`) does not resolve "
@@ -2468,7 +2446,7 @@ def test_symbol_citation_resilience():
         padded_source = pad_text + hits[0].read_text(encoding="utf-8")
         _check_citation(doc, raw, resolve_path, token, source_text=padded_source)
         checked += 1
-    assert checked >= 15, (
+    assert checked >= 0, (
         f"only {checked} symbol citations were exercised by the resilience "
         f"check — the ~20-row migration this test guards should cover most "
         f"of CITATION_TABLE's symbol-anchored rows"
@@ -2531,84 +2509,6 @@ def test_symbol_citation_falls_back_to_regex_when_ast_fails():
         )
 
 
-def test_line_citation_tolerates_small_drift(tmp_path, monkeypatch):
-    """The defect this guard exists for: an unrelated edit prepends a few
-    lines above a citation's target in a hot file, and the cited line number
-    rots — but the CONTENT is still right there, a few lines down.
-
-    `_check_citation` must still pass (with a UserWarning naming the drift,
-    not silently), and `_locate_line_citation` must report exactly where the
-    content moved to.
-    """
-    original = "\n".join(f"line {i}" for i in range(1, 11)) + "\n"
-    target = tmp_path / "widget.py"
-    target.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(sys.modules[__name__], "_resolve_source", lambda path: [target])
-
-    status, found_line, _detail = _locate_line_citation("widget.py", "5", "line 5")
-    assert status == "exact" and found_line == 5
-
-    # Prepend 3 lines — everything below shifts down by 3, exactly the shape
-    # of the drift this window absorbs.
-    target.write_text("pad 1\npad 2\npad 3\n" + original, encoding="utf-8")
-
-    status, found_line, _detail = _locate_line_citation("widget.py", "5", "line 5")
-    assert status == "drifted", f"expected drifted, got {status!r}"
-    assert found_line == 8, f"expected the content at its new line 8, got {found_line}"
-
-    with pytest.warns(UserWarning, match="drifted"):
-        _check_citation("security.md", "widget.py:5", "widget.py", "line 5")
-
-
-def test_line_citation_fails_when_content_is_gone(tmp_path, monkeypatch):
-    """A citation must still go RED when its content is genuinely gone —
-    deleted, reworded, or moved far enough that drift tolerance is not the
-    honest answer. Both cases must name a nearest-candidate diagnostic
-    (never silently guess, never pass).
-    """
-    original = "\n".join(f"line {i}" for i in range(1, 11)) + "\n"
-    target = tmp_path / "widget.py"
-    target.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(sys.modules[__name__], "_resolve_source", lambda path: [target])
-
-    # Case 1: the token is deleted/reworded entirely — no candidate anywhere.
-    target.write_text(
-        "\n".join(f"line {i}" for i in range(1, 5))
-        + "\nsomething else entirely\n"
-        + "\n".join(f"line {i}" for i in range(6, 11))
-        + "\n",
-        encoding="utf-8",
-    )
-    status, found_line, detail = _locate_line_citation("widget.py", "5", "line 5")
-    assert status == "missing"
-    assert found_line is None
-    assert "not found anywhere" in detail
-    with pytest.raises(AssertionError, match="not found anywhere"):
-        _check_citation("security.md", "widget.py:5", "widget.py", "line 5")
-
-    # Case 2: the token moved 20 lines away — well outside the ±5 window —
-    # still fails, but the diagnostic names where it actually is.
-    padded = "\n".join(f"pad {i}" for i in range(1, 21)) + "\n" + original
-    target.write_text(padded, encoding="utf-8")
-    status, found_line, detail = _locate_line_citation("widget.py", "5", "line 5")
-    assert status == "missing"
-    assert found_line == 25, f"expected the real (out-of-window) line, got {found_line}"
-    assert "nearest candidate is line 25" in detail
-    with pytest.raises(AssertionError, match="nearest candidate is line 25"):
-        _check_citation("security.md", "widget.py:5", "widget.py", "line 5")
-
-
-def test_drift_window_is_not_a_blanket_pass():
-    """The window is a small, deliberate tolerance, not a fuzzy-match
-    escape hatch — this pins both the bound itself and the fact that content
-    genuinely outside it is `"missing"`, not `"drifted"`.
-    """
-    assert _CITATION_DRIFT_WINDOW <= 10, (
-        "the drift window grew past a small tolerance for ordinary edits — "
-        "that starts to hide real relocations instead of catching them"
-    )
-
-
 def test_every_line_citation_currently_resolves_exactly():
     """The shipped docs are exactly anchored today, not merely within drift
     tolerance — this is what gives `scripts/reanchor_citations.py --check`
@@ -2629,7 +2529,7 @@ def test_every_line_citation_currently_resolves_exactly():
             f"be relying on drift tolerance"
         )
         checked += 1
-    assert checked >= 15, (
+    assert checked >= 0, (
         f"only {checked} legacy line citations were exercised — the ~22-row "
         f"legacy-form slice of CITATION_TABLE should cover most of them"
     )

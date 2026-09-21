@@ -128,35 +128,26 @@ def plan(mod, rows) -> tuple[list[Drift], list[Unfixable]]:
     """Classify every row in *rows*: drifted (fixable), missing (unfixable —
     nothing to anchor to), or fine (neither, skipped).
 
-    Both citation forms are handled, and they are fixable for different reasons.
-    A legacy line-form row is anchored by PROXIMITY, so a match beyond the drift
-    window is a guess and is refused. A `symbol:line` row is anchored by the
-    SYMBOL, which resolves however far the code has moved, so its number can be
-    rewritten exactly at any distance (issue #93).
+    A legacy line-form row is unfixable because it has no symbol.
+    A `symbol:line` row is anchored by the SYMBOL, which resolves however far
+    the code has moved, so its number can be rewritten exactly at any distance.
     """
     drifts: list[Drift] = []
     unfixable: list[Unfixable] = []
     for doc, raw, resolve_path, token in rows:
         tail = raw.split(":", 1)[1]
-        if not mod._LEGACY_LINE_SPEC_RE.match(tail):
-            actual = _symbol_drift(mod, resolve_path, tail, token)
-            if actual is not None:
-                prefix = raw.split(":", 1)[0]
-                drifts.append(Drift(
-                    doc, raw, f"{prefix}:{_new_symbol_spec(tail, actual)}",
-                    resolve_path))
-            continue
-        status, found_line, detail = mod._locate_line_citation(resolve_path, tail, token)
-        if status in ("exact", "unresolved"):
-            continue
-        if status == "missing":
+        if mod._LEGACY_LINE_SPEC_RE.match(tail):
             unfixable.append(Unfixable(
                 doc, raw,
-                detail or f"{token!r} not found near `{raw}` in {resolve_path}"))
+                "citation is line-only; symbol missing, cannot auto-reanchor"
+            ))
             continue
-        prefix = raw.split(":", 1)[0]
-        new_raw = f"{prefix}:{_new_spec(tail, found_line)}"
-        drifts.append(Drift(doc, raw, new_raw, resolve_path))
+        actual = _symbol_drift(mod, resolve_path, tail, token)
+        if actual is not None:
+            prefix = raw.split(":", 1)[0]
+            drifts.append(Drift(
+                doc, raw, f"{prefix}:{_new_symbol_spec(tail, actual)}",
+                resolve_path))
     return drifts, unfixable
 
 
