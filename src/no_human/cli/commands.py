@@ -9062,10 +9062,11 @@ def _load_reviewer_recall_runner():
 
 
 @bench.command("report")
+@click.option("--mode", type=click.Choice(["gate", "diff-only"]), default="diff-only", help="Reviewer recall mode.")
 @click.option("--reviewer-recall", is_flag=True,
              help="Score the fresh-context reviewer against the seeded-defect "
                   "corpus instead (SCRUM-29, docs/REVIEWER_RECALL_METHOD.md).")
-def bench_report(reviewer_recall: bool):
+def bench_report(reviewer_recall: bool, mode: str = 'diff-only'):
     """Re-render docs/NORTH_STAR_BENCH.md from the latest saved results."""
     if reviewer_recall:
         config, _ = _bootstrap()
@@ -9073,7 +9074,7 @@ def bench_report(reviewer_recall: bool):
         # markup=False: the per-class breakdown is bracketed ("[logic 2/2, …]")
         # and rich would otherwise swallow it as a style tag.
         try:
-            text = module.run_and_report(repo_root, model=config.review_model)
+            text = module.run_and_report(repo_root, model=config.review_model, mode=mode)
         except module.HeadlineRefusedError as exc:
             # SCRUM-47's refusal is the correct outcome for a broken checkout —
             # surface it as a clean refusal, not a traceback.

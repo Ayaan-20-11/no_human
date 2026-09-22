@@ -146,6 +146,7 @@ class RecallReport:
     results: list[CaseResult]
     model: str
     run_date: str
+    mode: str = 'diff-only'
     method_doc: str = METHOD_DOC
 
 
@@ -379,6 +380,69 @@ async def run_case(
     return score_case(case, outcome)
 
 
+
+
+
+def _gate_reviewer_fn(model: str) -> ReviewerFn:
+    async def _fn(repo_path: Path, diff_text: str, case: CaseSpec) -> ReviewOutcome:
+        import os
+        import shutil
+        from no_human.config import load_config, CONFIG_PATH
+        from no_human.core.task import Task
+        from no_human.review.reviewer import AdversarialReviewer
+        
+        # Load real config BEFORE sandboxing HOME, so we know what to copy
+        real_config = load_config(create_if_missing=False)
+        real_config_path = CONFIG_PATH
+        
+        # Gate mode requires a commit to compare against
+        _run(["git", "add", "-A"], cwd=repo_path)
+        _run(["git", "-c", "user.email=reviewer-recall@no-human.local",
+              "-c", "user.name=reviewer-recall", "commit", "-q", "-m", "head", "--allow-empty"], cwd=repo_path)
+              
+        original_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(repo_path)
+        try:
+            # Copy config into the sandbox so the reviewer factory can find it
+            sandbox_nh = repo_path / ".no_human"
+            sandbox_nh.mkdir(parents=True, exist_ok=True)
+            if real_config_path.exists():
+                shutil.copy2(real_config_path, sandbox_nh / "config.yaml")
+                
+            config = load_config(create_if_missing=False)
+            reviewer = AdversarialReviewer.from_config(config.data)
+            
+            task = Task.new(f"reviewer-recall probe: {case.case_id}",
+                            repo_path=str(repo_path),
+                            description=case.request or None)
+            
+            decision = await reviewer.review(
+                task,
+                repo_path=repo_path,
+                before_ref="HEAD^",
+                after_ref="HEAD",
+            )
+        finally:
+            if original_home is not None:
+                os.environ["HOME"] = original_home
+            else:
+                del os.environ["HOME"]
+                
+        blocking_ids = {id(item) for item in decision.blocking_items}
+        findings = [
+            Finding(file=item.file or "", line=item.line or 0,
+                    text=f"{item.label}: {item.comment or item.evidence}",
+                    blocking=id(item) in blocking_ids)
+            for item in decision.failed_items
+        ]
+        return ReviewOutcome(
+            status="PASS" if decision.passed else "FAIL",
+            findings=findings,
+            demoted_citations=list(decision.demoted_citations),
+            goal=getattr(decision, "goal", None),
+        )
+    return _fn
+
 def _default_reviewer_fn(model: str) -> ReviewerFn:
     """Wraps the existing fresh-context reviewer (no_human.review.reviewer)."""
 
@@ -421,20 +485,21 @@ async def run_all(
     cases_dir: Path = CASES_DIR,
     reviewer_fn: ReviewerFn | None = None,
     model: str,
+    mode: str = 'diff-only',
     run_date: str | None = None,
     runs_dir: Path = RUNS_DIR,
     overwrite: bool = False,
 ) -> RecallReport:
     run_date = run_date or _today()
     _assert_runs_dir_writable(runs_dir, run_date, overwrite)
-    fn = reviewer_fn or _default_reviewer_fn(model)
+    fn = reviewer_fn or (_gate_reviewer_fn(model) if mode == 'gate' else _default_reviewer_fn(model))
     cases = load_cases(cases_dir)
     results: list[CaseResult] = []
     with tempfile.TemporaryDirectory(prefix="nh-reviewer-recall-") as tmp:
         workdir = Path(tmp)
         for case in cases:
             results.append(await run_case(repo_root, case, fn, workdir))
-    report = RecallReport(results=results, model=model, run_date=run_date)
+    report = RecallReport(results=results, model=model, run_date=run_date, mode=mode)
     write_transcripts(report, runs_dir, overwrite=overwrite)
     return report
 
@@ -556,7 +621,15 @@ def render_report(report: RecallReport) -> str:
     )
     class_suffix = f"  [{class_parts}]" if class_parts else ""
 
+
     clean = sum(1 for r in controls if r.clean_pass)
+    false_positives = len(controls) - clean
+    if false_positives > total / 2:
+        raise RuntimeError(
+            f"instrument broken: control arm caught {false_positives} of {len(controls)} "
+            f"clean diffs, which is more than half the {total} replayed misses."
+        )
+
 
     lines = [
         f"reviewer recall: {caught}/{total}{pct}{class_suffix}",
@@ -580,7 +653,7 @@ def render_report(report: RecallReport) -> str:
                 lines.append(f"      {r.case_id}: {d}")
 
     lines.append(
-        f"model: {report.model} · run date: {report.run_date} · "
+        f"model: {report.model} ({report.mode} mode) · run date: {report.run_date} · "
         f"method: {report.method_doc}"
     )
     return "\n".join(lines)
@@ -591,6 +664,7 @@ def run_and_report(
     *,
     reviewer_fn: ReviewerFn | None = None,
     model: str,
+    mode: str = 'diff-only',
     overwrite: bool = False,
 ) -> str:
     """CLI entry point: `nh bench report --reviewer-recall` calls this.
@@ -600,5 +674,5 @@ def run_and_report(
     """
     root = Path(repo_root) if repo_root else Path(__file__).resolve().parents[2]
     report = asyncio.run(run_all(root, reviewer_fn=reviewer_fn, model=model,
-                                 overwrite=overwrite))
+                                 overwrite=overwrite, mode=mode))
     return render_report(report)
