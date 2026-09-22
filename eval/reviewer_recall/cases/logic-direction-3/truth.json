@@ -1,0 +1,11 @@
+{
+  "class": "logic",
+  "send_back_feedback": [
+    {
+      "author": "human",
+      "message": "Wait, stripping the user name is not enough, you must check for empty strings."
+    }
+  ],
+  "file": "target.py",
+  "description": "Send back direction test 3"
+}

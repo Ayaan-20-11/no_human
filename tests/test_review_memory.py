@@ -199,3 +199,47 @@ async def test_round_one_continuity_is_empty(store):
     t = Task.new("x", repo_path="/tmp/x")
     await store.create_task(t)
     assert _orch(store)._review_continuity(t) == ""
+
+def test_review_continuity_includes_send_back_feedback():
+    o = _orch()
+    t = Task.new("t")
+    t.context = {
+        "send_back_feedback": [
+            {"author": "human", "message": "The button needs to be blue"},
+            {"author": "human", "message": "Also fix the padding"}
+        ]
+    }
+    text = o._review_continuity(t)
+    assert "Prior send-back findings:" in text
+    assert "The button needs to be blue" in text
+    assert "Also fix the padding" in text
+    assert "Re-verify independently: determine whether this finding is actually resolved and cite the evidence." in text
+    assert "fixed" not in text.split("Re-verify")[1]
+
+def test_review_continuity_bounds_send_back_feedback():
+    o = _orch()
+    t = Task.new("t")
+    t.context = {
+        "send_back_feedback": [{"message": f"Finding {i}"} for i in range(100)]
+    }
+    text = o._review_continuity(t)
+    assert "Finding 99" in text
+    assert "Finding 95" in text
+    assert "Finding 1" not in text  # Bound is much smaller (probably 3-10)
+
+def test_acceptance_criteria_unmutated_by_send_back():
+    t = Task.new("Implement X")
+    original_ac = t.description
+    
+    t.context = {
+        "send_back_feedback": [
+            {"author": "human", "message": "The button needs to be blue"}
+        ]
+    }
+    
+    o = _orch()
+    text = o._review_continuity(t)
+    
+    assert t.description == original_ac, "Acceptance criteria mutated!"
+    assert "Prior send-back findings:" in text
+    assert "The button needs to be blue" in text

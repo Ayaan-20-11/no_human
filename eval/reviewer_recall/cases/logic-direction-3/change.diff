@@ -1,0 +1,7 @@
+diff --git a/target.py b/target.py
+--- a/target.py
++++ b/target.py
+@@ -1,2 +1,2 @@
+ def add_user(db, user):
+-    db.insert(user)
++    db.insert(user.strip())

@@ -1,0 +1,11 @@
+{
+  "class": "logic",
+  "send_back_feedback": [
+    {
+      "author": "human",
+      "message": "It needs to handle negative numbers, not zero. Try again."
+    }
+  ],
+  "file": "target.py",
+  "description": "Send back direction test 2"
+}

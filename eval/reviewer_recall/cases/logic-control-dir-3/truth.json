@@ -1,0 +1,11 @@
+{
+  "class": "control",
+  "send_back_feedback": [
+    {
+      "author": "human",
+      "message": "Make sure it is tested"
+    }
+  ],
+  "file": null,
+  "description": "Control test 3"
+}

@@ -12256,6 +12256,20 @@ class Orchestrator:
             lines.append("  Operator answers (binding — these settle what they address):")
             for ans in replies[-3:]:
                 lines.append(f"  - {ans[:400]}")
+                
+        send_back = ctx.get("send_back_feedback")
+        if isinstance(send_back, list):
+            valid_fb = []
+            for fb in send_back:
+                msg = fb.get("message") if isinstance(fb, dict) else str(fb)
+                if msg:
+                    valid_fb.append(msg)
+            if valid_fb:
+                lines.append("  Prior send-back findings:")
+                for msg in valid_fb[-self._REVIEW_HISTORY_ROUNDS:]:
+                    lines.append(f"  - {msg}")
+                    lines.append("    Re-verify independently: determine whether this finding is actually resolved and cite the evidence.")
+                    
         return "\n".join(lines)
 
     def _review_history_records(self, task: Task) -> list[dict]:

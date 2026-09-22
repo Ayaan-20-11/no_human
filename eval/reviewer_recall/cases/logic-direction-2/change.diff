@@ -1,0 +1,7 @@
+diff --git a/target.py b/target.py
+--- a/target.py
++++ b/target.py
+@@ -1,2 +1,2 @@
+ def is_valid(num):
+-    return num > 0
++    return num >= 0

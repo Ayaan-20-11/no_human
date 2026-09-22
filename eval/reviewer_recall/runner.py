@@ -415,6 +415,8 @@ def _gate_reviewer_fn(model: str) -> ReviewerFn:
             task = Task.new(f"reviewer-recall probe: {case.case_id}",
                             repo_path=str(repo_path),
                             description=case.request or None)
+            if case.truth.get("send_back_feedback"):
+                task.context = {"send_back_feedback": case.truth["send_back_feedback"]}
             
             decision = await reviewer.review(
                 task,
@@ -456,6 +458,8 @@ def _default_reviewer_fn(model: str) -> ReviewerFn:
                         # prompt renders it verbatim, which is what makes a
                         # goal-reachability judgment possible at all.
                         description=case.request or None)
+        if case.truth.get("send_back_feedback"):
+            task.context = {"send_back_feedback": case.truth["send_back_feedback"]}
         reviewer = AdversarialReviewer(model=model)
         decision = await reviewer.review(task, repo_path=repo_path,
                                          diff_override=diff_text, before_ref="HEAD")
