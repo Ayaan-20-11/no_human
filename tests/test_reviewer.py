@@ -1429,9 +1429,9 @@ def test_linked_section_notes_a_repo_with_no_changes(linked_pair):
     empty linked list yields the empty string (single-repo byte-identical)."""
     from no_human.review.reviewer import _linked_repos_review_section
     primary, _linked = linked_pair
-    section = _linked_repos_review_section([(primary, "HEAD")])  # HEAD..HEAD = no diff
+    section, _ = _linked_repos_review_section([(primary, "HEAD")])  # HEAD..HEAD = no diff
     assert "NO CHANGES in this repo" in section
-    assert _linked_repos_review_section([]) == ""
+    assert _linked_repos_review_section([]) == ("", {})
 
 
 # --------------------------------------------------------------------------- #
