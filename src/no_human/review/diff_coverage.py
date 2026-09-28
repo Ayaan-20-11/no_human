@@ -14,7 +14,6 @@ from collections.abc import Iterable
 from ..vcs.derived_conflict import DERIVED_ARTEFACTS
 from .lint_evidence import unquote_git_path
 
-
 TRUSTED_COVERAGE_EXCLUSIONS: frozenset[str] = frozenset()
 _COVERAGE_NOTE = (
     "\nDIFF COVERAGE — these changed-file patches were cut by the per-file "
@@ -194,7 +193,7 @@ def _path_tokens(text: str) -> list[str]:
     cannot appear in a path leaves the candidates, and `./x` is written
     `x` so the comparison below has one spelling to handle.
     """
-    return [token[2:] if token.startswith("./") else token
+    return [token.removeprefix("./")
             for token in _PATH_TOKEN.findall(text)]
 
 
@@ -264,20 +263,29 @@ class InspectionTracker:
     hand-written root `RELEASE_MANIFEST.txt` is exempted too, since this layer
     does not know which repository it reviews.
 
-    Scope, so the gap is recorded rather than discovered: only the PRIMARY
-    diff's cut paths are tracked. `_linked_repos_review_section` drops the cut
-    paths of a linked repo (the `_cut_paths` it names and does not use), so a
-    truncated linked-repo patch can still reach a verdict unread. That is the
-    same failure in a narrower place than the one this closes, and widening
-    the check belongs with whoever gives linked repos coverage that matters.
+    Scope: Tracks the primary diff's cut paths as well as linked repository cut
+    paths. Linked repository paths are recorded with their absolute path prefix
+    so the rejection message can distinguish them.
     """
 
-    def __init__(self, required: Iterable[str] | None = None) -> None:
-        self._required = set(required or ()) - DERIVED_ARTEFACTS
-        self._seen: set[str] = set()
-        # tool_use_id -> required paths whose parent directory that call named,
+    def __init__(self, required: dict[str, list[str]] | Iterable[str] | None = None) -> None:
+        self._required: dict[str, set[str]] = {}
+        if isinstance(required, dict):
+            for repo, paths in required.items():
+                req_set = set(paths)
+                if not repo:
+                    req_set -= DERIVED_ARTEFACTS
+                if req_set:
+                    self._required[repo] = req_set
+        else:
+            req_set = set(required or ()) - DERIVED_ARTEFACTS
+            if req_set:
+                self._required[""] = req_set
+                
+        self._seen: set[tuple[str, str]] = set()
+        # tool_use_id -> required (repo, path) whose parent directory that call named,
         # awaiting its tool_result (rule 2 in the class docstring).
-        self._listings: dict[str, set[str]] = {}
+        self._listings: dict[str, set[tuple[str, str]]] = {}
 
     def note_event(self, event: object) -> None:
         """Record every required path named anywhere in a tool call's input,
@@ -296,10 +304,10 @@ class InspectionTracker:
             candidates = self._listings.pop(meta.get("tool_use_id"), set())
             if candidates and not meta.get("is_error"):
                 names = set(_path_tokens(getattr(event, "output", None) or ""))
-                self._seen.update(
-                    path for path in candidates
-                    if path.rsplit("/", 1)[-1] in names
-                    or any(_names_path(name, path) for name in names))
+                for repo, path in candidates:
+                    check_path = path if not repo else f"{repo}/{path}"
+                    if path.rsplit("/", 1)[-1] in names or any(_names_path(name, check_path) for name in names):
+                        self._seen.add((repo, path))
             return
         tokens: list[str] = []
         stack = [getattr(event, "tool_input", None) or {}]
@@ -312,18 +320,35 @@ class InspectionTracker:
             elif isinstance(value, str):
                 tokens.extend(_path_tokens(value))
         for token in tokens:
-            self._seen.update(
-                path for path in self._required if _names_path(token, path))
-        listed = {
-            path for path in self._required - self._seen if "/" in path
-            and any(_names_path(token.rstrip("/"), path.rsplit("/", 1)[0])
-                    for token in tokens)}
+            for repo, paths in self._required.items():
+                for path in paths:
+                    check_path = path if not repo else f"{repo}/{path}"
+                    if _names_path(token, check_path):
+                        self._seen.add((repo, path))
+        listed = set()
+        for repo, paths in self._required.items():
+            for path in paths:
+                if (repo, path) in self._seen or "/" not in path:
+                    continue
+                check_parent = path.rsplit("/", 1)[0]
+                if repo:
+                    check_parent = f"{repo}/{check_parent}"
+                if any(_names_path(token.rstrip("/"), check_parent) for token in tokens):
+                    listed.add((repo, path))
         if listed and meta.get("tool_use_id"):
             self._listings[meta["tool_use_id"]] = listed
 
     def unreferenced(self) -> list[str]:
         """Required paths that never appeared in any tool input, sorted."""
-        return sorted(self._required - self._seen)
+        missing = []
+        for repo, paths in self._required.items():
+            for path in paths:
+                if (repo, path) not in self._seen:
+                    if repo:
+                        missing.append(f"linked repo {repo} {path}")
+                    else:
+                        missing.append(path)
+        return sorted(missing)
 
     def rejection(self) -> str:
         """Why this verdict must not stand, or "" when every path came up."""
