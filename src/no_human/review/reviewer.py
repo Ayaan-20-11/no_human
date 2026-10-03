@@ -620,7 +620,7 @@ def _full_file_context(
     return block, sorted(omitted)
 
 
-def _linked_repos_review_section(linked: list[tuple[Path, str]]) -> str:
+def _linked_repos_review_section(linked: list[tuple[Path, str]]) -> tuple[str, list[str]]:
     """Render each linked repo's diff for the GATE reviewer.
 
     Mirrors ``multi_repo.linked_repos_block`` — which tells the PLANNER the
@@ -638,7 +638,7 @@ def _linked_repos_review_section(linked: list[tuple[Path, str]]) -> str:
     existing ``_DIFF_CAP``, so the section cannot bloat past the primary's.
     """
     if not linked:
-        return ""
+        return "", []
     parts = [
         "LINKED REPOSITORIES UNDER REVIEW — this task changed more than one\n"
         "repository. The diffs below are part of the SAME task as the primary\n"
@@ -648,8 +648,11 @@ def _linked_repos_review_section(linked: list[tuple[Path, str]]) -> str:
         "a linked repo, cite the file path as shown in that repo's diff header;\n"
         "you may also read any linked repo by absolute path with your tools.\n"
     ]
+    linked_cut_paths: list[str] = []
     for lpath, lbefore in linked:
         diff, total, _cut_paths = _git_diff(lpath, lbefore, "HEAD")
+        if _cut_paths:
+            linked_cut_paths.extend(f"{lpath}/{p}" for p in _cut_paths)
         if not diff.strip():
             parts.append(
                 f"\n--- linked repo {lpath} — NO CHANGES in this repo ---\n"
@@ -662,7 +665,7 @@ def _linked_repos_review_section(linked: list[tuple[Path, str]]) -> str:
         parts.append(
             f"\n--- linked repo {lpath}{trunc} ---\n```\n{diff}\n```\n"
         )
-    return "".join(parts) + "\n"
+    return "".join(parts) + "\n", linked_cut_paths
 
 
 _INVOCATION_ERROR_RE = re.compile(
@@ -2713,10 +2716,10 @@ class AdversarialReviewer:
         # change. Only in the multi-turn (no diff_override) gate path — the
         # single-turn override path reviews the caller-supplied diff verbatim.
         # Empty/None → byte-identical single-repo prompt and citation behaviour.
-        linked_section = (
-            _linked_repos_review_section(linked_repos or [])
-            if not diff_override else ""
-        )
+        linked_section = ""
+        linked_cut_paths = []
+        if not diff_override and linked_repos:
+            linked_section, linked_cut_paths = _linked_repos_review_section(linked_repos)
         if diff_override:
             # DISCLOSURE, not inspection — the override path has no refs and
             # no tools, so it names what it cut instead of demanding reads.
@@ -2750,7 +2753,7 @@ class AdversarialReviewer:
         # was just made. Lint and wiring are seconds and stay on both routes.
         route_single_turn = (
             single_turn and not diff_override
-            and not omitted_files and diff_total_len == len(diff)
+            and not omitted_files and not linked_cut_paths and diff_total_len == len(diff)
         )
         if not diff_override:
             lint_evidence, wiring_evidence, type_evidence = (
@@ -2807,11 +2810,12 @@ class AdversarialReviewer:
                 ), [decision])
         else:
             # Full agent session for post-implementation reviews (needs to read files).
+            req_inspections = cut_paths + linked_cut_paths
             decision = await self._agent_review(
                 prompt, repo_path, before_ref=before_ref,
                 max_turns=self._tier_review_turns(task),
                 extra_repos=linked_repos or None,
-                required_inspections=cut_paths,
+                required_inspections=req_inspections if req_inspections else None,
             )
 
         # Bounded refute pass (gate path only — see the module-level comment

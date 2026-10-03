@@ -76,6 +76,8 @@ MAX_FILE_LINES = 2500
 # sentence false without anyone editing it. `test_no_ledger_entry_claims_
 # equality_with_a_frozen_value` below enforces this.
 FROZEN_FUNCTION_LINES = {
+    # 0 -> 301 (+301): #602 fix extracts linked cut paths and routes correctly
+    "review/reviewer.py:AdversarialReviewer.review": 301,
     # 2099 -> 2108 (+9): PR #877 widens the tamper base to three-dot
     # origin/<base>...HEAD so a sanctioned merge isn't charged with main's own
     # landed test edits (attempt-authored gutting still fires). Re-anchored on merge.
@@ -2268,7 +2270,8 @@ FROZEN_FILE_LINES = {
     # and branches the retry prompt to append that note only when the
     # rejected round's reason names files cut by `budget_diff`. Measured on
     # this tree.
-    "review/reviewer.py": 3373,
+    # 3373 -> 3377 (+4): #602 fix extracts linked cut paths and routes correctly
+    "review/reviewer.py": 3377,
     # 2706 -> 2711 (+5): pre-existing red on main at 03b262d23 (e922e9b4's
     # landing, change-scoped tests missed the ratchet) — repaired, measured,
     # on this merge; same cause as the two function-level wake.py bumps above.

@@ -311,6 +311,8 @@ class InspectionTracker:
                 stack.extend(value)
             elif isinstance(value, str):
                 tokens.extend(_path_tokens(value))
+                if value.strip():
+                    tokens.append(value.strip())
         for token in tokens:
             self._seen.update(
                 path for path in self._required if _names_path(token, path))
